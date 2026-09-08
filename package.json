@@ -1,0 +1,22 @@
+{
+  "name": "strict-glob",
+  "version": "0.1.0",
+  "description": "A strict-by-default glob pattern matcher for TypeScript, with an explicit lenient mode.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc"
+  },
+  "license": "MIT",
+  "author": "phall359",
+  "keywords": [
+    "glob",
+    "pattern",
+    "matcher",
+    "typescript"
+  ]
+}
