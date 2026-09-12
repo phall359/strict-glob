@@ -73,14 +73,25 @@ nothing).
 | `?`     | exactly one character, not `/`                          |
 | `[abc]` | one of `a`, `b`, or `c`                                  |
 | `[!abc]`| any character except `a`, `b`, or `c`                    |
+| `{a,b}` | either alternative, expanded before the pattern is compiled |
 
-Brace expansion (`{a,b}`) isn't implemented yet; see the roadmap in the repo
-history. In strict mode a pattern containing `{` or `}` is rejected rather
-than silently treated as a literal, so code written against this version
-won't change meaning once expansion lands.
+`{a,b}` alternatives can nest (`{a,{b,c}}`) and can appear anywhere in the
+pattern, including inside a single path segment (`*.{js,ts}`). A brace
+group without a top-level comma, like `{foo}`, isn't a real alternation and
+is left as a literal `{foo}`, matching shell behavior. An unmatched `{`
+is rejected in strict mode, the same as an unmatched `[`.
+
+```ts
+matchGlob('*.{js,ts}', 'index.ts')          // true
+matchGlob('{src,lib}/**/*.ts', 'lib/a.ts')  // true
+compileGlob('a{b,c')                        // throws: unmatched "{"
+```
+
+`CompiledGlob.patterns` holds the normalized pattern(s) after brace
+expansion; a pattern with no braces still compiles to a single-element
+array.
 
 ## Status
 
 Early skeleton. The matcher covers the token table above; nested character
-classes, brace expansion, and a `.gitignore`-style negation prefix are not
-implemented yet.
+classes and a `.gitignore`-style negation prefix are not implemented yet.

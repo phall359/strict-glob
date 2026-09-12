@@ -58,13 +58,6 @@ export function normalizePattern(pattern: string, options: NormalizeOptions): st
     working = working.slice(0, -1)
   }
 
-  if (working.includes('{') || working.includes('}')) {
-    if (!lenient) {
-      throw new GlobSyntaxError('brace expansion ("{a,b}") is not supported yet', pattern)
-    }
-    // left as literal characters; the translator escapes them
-  }
-
   if (hasUnmatchedBracket(working) && !lenient) {
     throw new GlobSyntaxError('unmatched "[" in character class', pattern)
   }
@@ -93,4 +86,115 @@ function hasUnmatchedBracket(pattern: string): boolean {
     }
   }
   return inBracket
+}
+
+/**
+ * Expands "{a,b}" alternation into the set of concrete patterns it stands
+ * for, e.g. "a{b,c}d" -> ["abd", "acd"]. Runs before normalizePattern so
+ * that every other check (trailing slash, "**" placement, ...) sees the
+ * same concrete strings a caller would have written by hand.
+ *
+ * A "[...]" character class is treated as opaque: braces and commas inside
+ * one don't participate in expansion, matching how brackets work everywhere
+ * else in the pattern language.
+ */
+export function expandBraces(pattern: string, options: NormalizeOptions): string[] {
+  const { lenient } = options
+  const open = findBraceOutsideBracket(pattern)
+  if (open === -1) return [pattern]
+
+  const close = findMatchingBrace(pattern, open)
+  if (close === -1) {
+    if (!lenient) {
+      throw new GlobSyntaxError('unmatched "{" in brace expansion', pattern)
+    }
+    // Stray "{" with no partner: leave it as a literal character and keep
+    // scanning the rest of the pattern for real brace groups.
+    const prefix = pattern.slice(0, open + 1)
+    return expandBraces(pattern.slice(open + 1), options).map((rest) => prefix + rest)
+  }
+
+  const prefix = pattern.slice(0, open)
+  const body = pattern.slice(open + 1, close)
+  const suffix = pattern.slice(close + 1)
+  const branches = splitTopLevelCommas(body)
+  const suffixExpansions = expandBraces(suffix, options)
+
+  if (branches.length < 2) {
+    // No top-level comma, so this isn't a real alternation (matches shell
+    // behavior): keep the braces as literal characters.
+    return suffixExpansions.map((rest) => `${prefix}{${body}}${rest}`)
+  }
+
+  const results: string[] = []
+  for (const branch of branches) {
+    for (const expandedBranch of expandBraces(branch, options)) {
+      for (const rest of suffixExpansions) {
+        results.push(prefix + expandedBranch + rest)
+      }
+    }
+  }
+  return results
+}
+
+function findBraceOutsideBracket(pattern: string): number {
+  let inBracket = false
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i]
+    if (ch === '[' && !inBracket) {
+      inBracket = true
+    } else if (ch === ']' && inBracket) {
+      inBracket = false
+    } else if (ch === '{' && !inBracket) {
+      return i
+    }
+  }
+  return -1
+}
+
+function findMatchingBrace(pattern: string, openIndex: number): number {
+  let depth = 0
+  let inBracket = false
+  for (let i = openIndex; i < pattern.length; i++) {
+    const ch = pattern[i]
+    if (ch === '[' && !inBracket) {
+      inBracket = true
+    } else if (ch === ']' && inBracket) {
+      inBracket = false
+    } else if (inBracket) {
+      continue
+    } else if (ch === '{') {
+      depth++
+    } else if (ch === '}') {
+      depth--
+      if (depth === 0) return i
+    }
+  }
+  return -1
+}
+
+function splitTopLevelCommas(body: string): string[] {
+  const parts: string[] = []
+  let depth = 0
+  let inBracket = false
+  let start = 0
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i]
+    if (ch === '[' && !inBracket) {
+      inBracket = true
+    } else if (ch === ']' && inBracket) {
+      inBracket = false
+    } else if (inBracket) {
+      continue
+    } else if (ch === '{') {
+      depth++
+    } else if (ch === '}') {
+      depth--
+    } else if (ch === ',' && depth === 0) {
+      parts.push(body.slice(start, i))
+      start = i + 1
+    }
+  }
+  parts.push(body.slice(start))
+  return parts
 }

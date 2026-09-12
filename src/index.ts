@@ -1,4 +1,4 @@
-import { normalizePattern } from './parser.js'
+import { expandBraces, normalizePattern } from './parser.js'
 
 export { GlobSyntaxError } from './parser.js'
 
@@ -11,18 +11,24 @@ export interface GlobOptions {
 }
 
 export interface CompiledGlob {
-  /** The pattern after normalization (may differ from the input in lenient mode). */
-  readonly pattern: string
+  /**
+   * The pattern(s) after brace expansion and normalization. There's more
+   * than one entry when the input used "{a,b}" alternation; each may also
+   * differ from the input in lenient mode.
+   */
+  readonly patterns: readonly string[]
   readonly regExp: RegExp
   test(path: string): boolean
 }
 
 export function compileGlob(pattern: string, options: GlobOptions = {}): CompiledGlob {
   const lenient = options.lenient ?? false
-  const normalized = normalizePattern(pattern, { lenient })
-  const regExp = toRegExp(normalized)
+  const patterns = expandBraces(pattern, { lenient }).map((variant) =>
+    normalizePattern(variant, { lenient }),
+  )
+  const regExp = toRegExp(patterns)
   return {
-    pattern: normalized,
+    patterns,
     regExp,
     test(path: string): boolean {
       return regExp.test(path)
@@ -38,7 +44,12 @@ export function matchGlob(pattern: string, path: string, options: GlobOptions = 
 // "[", "]", "*" and "?" are handled separately by translateSegment.
 const REGEXP_SPECIALS = /[.+^${}()|\\]/g
 
-function toRegExp(pattern: string): RegExp {
+function toRegExp(patterns: string[]): RegExp {
+  const alternatives = patterns.map(toRegExpSource)
+  return new RegExp(`^(?:${alternatives.join('|')})$`)
+}
+
+function toRegExpSource(pattern: string): string {
   const segments = pattern.split('/')
   const parts: string[] = []
 
@@ -62,7 +73,7 @@ function toRegExp(pattern: string): RegExp {
     if (!isLast) parts.push('/')
   }
 
-  return new RegExp(`^${parts.join('')}$`)
+  return parts.join('')
 }
 
 function translateSegment(segment: string): string {
